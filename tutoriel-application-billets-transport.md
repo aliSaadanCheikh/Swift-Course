@@ -1929,10 +1929,841 @@ curl -X POST http://localhost:8080/api/tickets/book \
 
 ---
 
+## 13. Frontend Mobile avec React Native
+
+### 13.1 Préparation de l'environnement React Native
+
+```bash
+# Installer Node.js (version 14 ou supérieure)
+curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Vérifier l'installation
+node --version
+npm --version
+
+# Installer React Native CLI
+npm install -g react-native-cli
+
+# Installer Expo CLI (recommandé pour débuter)
+npm install -g @expo/cli
+
+# Pour Android : Installer Android Studio
+# Télécharger depuis https://developer.android.com/studio
+```
+
+### 13.2 Création du projet React Native
+
+```bash
+# Créer un nouveau projet Expo
+npx create-expo-app TransportTicketApp
+cd TransportTicketApp
+
+# Ou créer un projet React Native classique
+# npx react-native init TransportTicketApp
+# cd TransportTicketApp
+
+# Installer les dépendances nécessaires
+npm install @react-navigation/native @react-navigation/stack @react-navigation/bottom-tabs
+npm install react-native-screens react-native-safe-area-context
+npm install axios react-native-async-storage/async-storage
+npm install react-native-vector-icons react-native-paper
+npm install react-native-date-picker react-native-modal
+npm install @react-native-picker/picker
+
+# Pour Expo
+npx expo install react-native-screens react-native-safe-area-context
+```
+
+### 13.3 Structure du projet mobile
+
+```
+TransportTicketApp/
+├── App.js
+├── app.json
+├── package.json
+├── src/
+│   ├── components/
+│   │   ├── common/
+│   │   │   ├── Button.js
+│   │   │   ├── Input.js
+│   │   │   ├── Loading.js
+│   │   │   └── Header.js
+│   │   ├── trip/
+│   │   │   ├── TripCard.js
+│   │   │   ├── TripList.js
+│   │   │   └── SearchForm.js
+│   │   └── ticket/
+│   │       ├── TicketCard.js
+│   │       ├── TicketList.js
+│   │       └── BookingForm.js
+│   ├── screens/
+│   │   ├── auth/
+│   │   │   ├── LoginScreen.js
+│   │   │   └── RegisterScreen.js
+│   │   ├── main/
+│   │   │   ├── HomeScreen.js
+│   │   │   ├── SearchScreen.js
+│   │   │   ├── BookingScreen.js
+│   │   │   ├── MyTicketsScreen.js
+│   │   │   └── ProfileScreen.js
+│   │   └── trip/
+│   │       ├── TripListScreen.js
+│   │       └── TripDetailScreen.js
+│   ├── services/
+│   │   ├── api.js
+│   │   ├── auth.js
+│   │   ├── trips.js
+│   │   └── tickets.js
+│   ├── navigation/
+│   │   ├── AppNavigator.js
+│   │   ├── AuthNavigator.js
+│   │   └── MainNavigator.js
+│   ├── context/
+│   │   └── AuthContext.js
+│   ├── utils/
+│   │   ├── constants.js
+│   │   ├── helpers.js
+│   │   └── storage.js
+│   └── styles/
+│       ├── colors.js
+│       ├── fonts.js
+│       └── common.js
+```
+
+### 13.4 Configuration de l'API
+
+Créer `src/services/api.js` :
+
+```javascript
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_BASE_URL = 'http://localhost:8080/api';
+
+// Créer une instance axios
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Intercepteur pour ajouter le token JWT
+api.interceptors.request.use(
+  async (config) => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (error) {
+      console.error('Erreur lors de la récupération du token:', error);
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Intercepteur pour gérer les réponses
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Token expiré, rediriger vers la connexion
+      await AsyncStorage.removeItem('authToken');
+      await AsyncStorage.removeItem('userData');
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;
+```
+
+### 13.5 Service d'authentification
+
+Créer `src/services/auth.js` :
+
+```javascript
+import api from './api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export const authService = {
+  // Connexion
+  login: async (username, password) => {
+    try {
+      const response = await api.post('/auth/login', {
+        username,
+        password,
+      });
+      
+      const { token } = response.data;
+      await AsyncStorage.setItem('authToken', token);
+      
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Inscription
+  register: async (userData) => {
+    try {
+      const response = await api.post('/auth/register', userData);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Déconnexion
+  logout: async () => {
+    try {
+      await AsyncStorage.removeItem('authToken');
+      await AsyncStorage.removeItem('userData');
+    } catch (error) {
+      console.error('Erreur lors de la déconnexion:', error);
+    }
+  },
+
+  // Vérifier si l'utilisateur est connecté
+  isAuthenticated: async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      return !!token;
+    } catch (error) {
+      return false;
+    }
+  },
+
+  // Obtenir le token
+  getToken: async () => {
+    try {
+      return await AsyncStorage.getItem('authToken');
+    } catch (error) {
+      return null;
+    }
+  },
+};
+```
+
+### 13.6 Service des voyages
+
+Créer `src/services/trips.js` :
+
+```javascript
+import api from './api';
+
+export const tripsService = {
+  // Rechercher des voyages
+  searchTrips: async (origin, destination, departureTime) => {
+    try {
+      const response = await api.get('/trips/search', {
+        params: {
+          origin,
+          destination,
+          departureTime,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Obtenir tous les voyages disponibles
+  getAvailableTrips: async () => {
+    try {
+      const response = await api.get('/trips/available');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Obtenir un voyage par ID
+  getTripById: async (id) => {
+    try {
+      const response = await api.get(`/trips/${id}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Obtenir tous les voyages
+  getAllTrips: async () => {
+    try {
+      const response = await api.get('/trips');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+};
+```
+
+### 13.7 Service des billets
+
+Créer `src/services/tickets.js` :
+
+```javascript
+import api from './api';
+
+export const ticketsService = {
+  // Réserver un billet
+  bookTicket: async (userId, tripId, seatNumber) => {
+    try {
+      const response = await api.post('/tickets/book', {
+        userId,
+        tripId,
+        seatNumber,
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Obtenir les billets d'un utilisateur
+  getUserTickets: async (userId) => {
+    try {
+      const response = await api.get(`/tickets/user/${userId}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Obtenir un billet par référence
+  getTicketByReference: async (bookingReference) => {
+    try {
+      const response = await api.get(`/tickets/booking/${bookingReference}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Confirmer un billet
+  confirmTicket: async (ticketId) => {
+    try {
+      const response = await api.put(`/tickets/${ticketId}/confirm`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Annuler un billet
+  cancelTicket: async (ticketId) => {
+    try {
+      const response = await api.put(`/tickets/${ticketId}/cancel`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+
+  // Utiliser un billet
+  useTicket: async (ticketId) => {
+    try {
+      const response = await api.put(`/tickets/${ticketId}/use`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
+};
+```
+
+### 13.8 Contexte d'authentification
+
+Créer `src/context/AuthContext.js` :
+
+```javascript
+import React, { createContext, useState, useContext, useEffect } from 'react';
+import { authService } from '../services/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const AuthContext = createContext();
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const token = await AsyncStorage.getItem('authToken');
+      const userData = await AsyncStorage.getItem('userData');
+      
+      if (token && userData) {
+        setUser(JSON.parse(userData));
+        setIsAuthenticated(true);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la vérification de l\'authentification:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (username, password) => {
+    try {
+      const response = await authService.login(username, password);
+      
+      // Stocker les données utilisateur
+      const userData = { username }; // Vous pouvez ajouter plus d'infos si nécessaire
+      await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      
+      setUser(userData);
+      setIsAuthenticated(true);
+      
+      return response;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const register = async (userData) => {
+    try {
+      const response = await authService.register(userData);
+      return response;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await authService.logout();
+      setUser(null);
+      setIsAuthenticated(false);
+    } catch (error) {
+      console.error('Erreur lors de la déconnexion:', error);
+    }
+  };
+
+  const value = {
+    user,
+    isAuthenticated,
+    loading,
+    login,
+    register,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+```
+
+### 13.9 Écran de connexion
+
+Créer `src/screens/auth/LoginScreen.js` :
+
+```javascript
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useAuth } from '../../context/AuthContext';
+
+const LoginScreen = ({ navigation }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+
+  const handleLogin = async () => {
+    if (!username || !password) {
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await login(username, password);
+      // La navigation sera gérée automatiquement par le contexte
+    } catch (error) {
+      Alert.alert('Erreur de connexion', error.message || 'Une erreur est survenue');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.form}>
+        <Text style={styles.title}>Connexion</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Nom d'utilisateur"
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+        />
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Mot de passe"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          <Text style={styles.buttonText}>
+            {loading ? 'Connexion...' : 'Se connecter'}
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => navigation.navigate('Register')}
+        >
+          <Text style={styles.linkText}>
+            Pas de compte ? S'inscrire
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  form: {
+    backgroundColor: 'white',
+    padding: 20,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 30,
+    color: '#333',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 15,
+    marginBottom: 15,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  button: {
+    backgroundColor: '#007bff',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  buttonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  linkButton: {
+    alignItems: 'center',
+  },
+  linkText: {
+    color: '#007bff',
+    fontSize: 16,
+  },
+});
+
+export default LoginScreen;
+```
+
+### 13.10 Écran d'inscription
+
+Créer `src/screens/auth/RegisterScreen.js` :
+
+```javascript
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useAuth } from '../../context/AuthContext';
+
+const RegisterScreen = ({ navigation }) => {
+  const [formData, setFormData] = useState({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    firstName: '',
+    lastName: '',
+    phone: '',
+  });
+  const [loading, setLoading] = useState(false);
+  const { register } = useAuth();
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const validateForm = () => {
+    const { username, email, password, confirmPassword, firstName, lastName } = formData;
+    
+    if (!username || !email || !password || !firstName || !lastName) {
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+      return false;
+    }
+    
+    if (password !== confirmPassword) {
+      Alert.alert('Erreur', 'Les mots de passe ne correspondent pas');
+      return false;
+    }
+    
+    if (password.length < 6) {
+      Alert.alert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères');
+      return false;
+    }
+    
+    return true;
+  };
+
+  const handleRegister = async () => {
+    if (!validateForm()) return;
+
+    setLoading(true);
+    try {
+      await register({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
+      });
+      
+      Alert.alert(
+        'Succès',
+        'Inscription réussie ! Vous pouvez maintenant vous connecter.',
+        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+      );
+    } catch (error) {
+      Alert.alert('Erreur d\'inscription', error.message || 'Une erreur est survenue');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.form}>
+          <Text style={styles.title}>Inscription</Text>
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Nom d'utilisateur *"
+            value={formData.username}
+            onChangeText={(value) => handleInputChange('username', value)}
+            autoCapitalize="none"
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Email *"
+            value={formData.email}
+            onChangeText={(value) => handleInputChange('email', value)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Prénom *"
+            value={formData.firstName}
+            onChangeText={(value) => handleInputChange('firstName', value)}
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Nom *"
+            value={formData.lastName}
+            onChangeText={(value) => handleInputChange('lastName', value)}
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Téléphone"
+            value={formData.phone}
+            onChangeText={(value) => handleInputChange('phone', value)}
+            keyboardType="phone-pad"
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Mot de passe *"
+            value={formData.password}
+            onChangeText={(value) => handleInputChange('password', value)}
+            secureTextEntry
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Confirmer le mot de passe *"
+            value={formData.confirmPassword}
+            onChangeText={(value) => handleInputChange('confirmPassword', value)}
+            secureTextEntry
+          />
+          
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleRegister}
+            disabled={loading}
+          >
+            <Text style={styles.buttonText}>
+              {loading ? 'Inscription...' : 'S\'inscrire'}
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={() => navigation.navigate('Login')}
+          >
+            <Text style={styles.linkText}>
+              Déjà un compte ? Se connecter
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  form: {
+    backgroundColor: 'white',
+    padding: 20,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 30,
+    color: '#333',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 15,
+    marginBottom: 15,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  button: {
+    backgroundColor: '#007bff',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  buttonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  linkButton: {
+    alignItems: 'center',
+  },
+  linkText: {
+    color: '#007bff',
+    fontSize: 16,
+  },
+});
+
+export default RegisterScreen;
+```
+
+---
+
 ## Conclusion
 
-Ce tutoriel vous a guidé à travers la création complète d'une application de vente de billets de transport avec Java et MySQL. Voici les points clés couverts :
+Ce tutoriel vous a guidé à travers la création complète d'une application de vente de billets de transport avec Java et MySQL pour le backend, et React Native pour le frontend mobile. Voici les points clés couverts :
 
+### Backend (Java + MySQL) :
 1. **Configuration de l'environnement** : Installation de Java, Maven, MySQL
 2. **Architecture Spring Boot** : Structure du projet, configuration, dépendances
 3. **Modélisation des données** : Entités JPA, relations, contraintes
@@ -1943,12 +2774,20 @@ Ce tutoriel vous a guidé à travers la création complète d'une application de
 8. **Tests** : Tests unitaires et d'intégration
 9. **Déploiement** : Configuration de production, Docker, scripts
 
+### Frontend Mobile (React Native) :
+10. **Configuration React Native** : Installation et setup du projet
+11. **Architecture mobile** : Structure des composants et services
+12. **Services API** : Communication avec le backend Java
+13. **Authentification mobile** : Gestion des tokens JWT
+14. **Interfaces utilisateur** : Écrans de connexion et inscription
+
 ### Prochaines étapes possibles :
 
-- Ajouter une interface utilisateur (React, Angular, ou Vue.js)
-- Implémenter des notifications en temps réel
-- Ajouter un système de paiement
-- Mettre en place une architecture microservices
-- Ajouter de la surveillance et du monitoring
+- Compléter les écrans de recherche et réservation
+- Ajouter des notifications push
+- Implémenter un système de paiement mobile
+- Ajouter la géolocalisation
+- Créer des tests automatisés pour le mobile
+- Optimiser les performances et l'UX
 
-Cette application constitue une base solide que vous pouvez étendre selon vos besoins spécifiques.
+Cette application constitue une base solide que vous pouvez étendre selon vos besoins spécifiques pour créer une solution complète de vente de billets de transport.
